@@ -42,7 +42,16 @@ type trackSeries struct {
 }
 
 // score 重新计算批次内全部轨迹对的化学交换候选（先清空再写入）。
+// 封存批次禁止再次评分，以免删除已发布候选、改变既有分析结果。
 func (svc *Service) score(batchID string) ([]model.ExchangeCandidate, error) {
+	b, err := svc.Store.GetBatch(batchID)
+	if err != nil {
+		return nil, err
+	}
+	if b.State == model.BatchSealed {
+		return nil, model.ErrSealedBatch
+	}
+
 	tracks, err := svc.Store.ListTracksByBatch(batchID)
 	if err != nil {
 		return nil, err
