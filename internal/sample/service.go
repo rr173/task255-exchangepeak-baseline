@@ -50,6 +50,8 @@ func (svc *Service) Create(in CreateInput) (*model.Sample, error) {
 }
 
 // AddTemperatures 向样品温度序列追加若干档温度，保证序列内温度值唯一。
+// 整体原子：只要请求内或与已有序列存在重复温度，本次追加整体失败，
+// 不留下任何部分新增的温度；否则整批按原顺序一次性写入。
 func (svc *Service) AddTemperatures(sampleID string, temps []float64) ([]model.TemperaturePoint, error) {
 	if _, err := svc.Store.GetSample(sampleID); err != nil {
 		return nil, err
@@ -63,6 +65,7 @@ func (svc *Service) AddTemperatures(sampleID string, temps []float64) ([]model.T
 		seen[tempKey(e.TempC)] = true
 	}
 	out := make([]model.TemperaturePoint, 0, len(temps))
+	points := make([]model.TemperaturePoint, 0, len(temps))
 	order := len(existing)
 	for _, t := range temps {
 		k := tempKey(t)
@@ -70,17 +73,19 @@ func (svc *Service) AddTemperatures(sampleID string, temps []float64) ([]model.T
 			return nil, model.ErrTempConflict
 		}
 		seen[k] = true
-		tp := &model.TemperaturePoint{
+		tp := model.TemperaturePoint{
 			ID:        uuid.NewString(),
 			SampleID:  sampleID,
 			TempC:     t,
 			SortOrder: order,
 		}
-		if err := svc.Store.AddTemperaturePoint(tp); err != nil {
-			return nil, err
-		}
-		out = append(out, *tp)
+		points = append(points, tp)
+		out = append(out, tp)
 		order++
+	}
+	// 全部校验通过后再整批原子写入，避免重复请求留下半套温度。
+	if err := svc.Store.AddTemperaturePoints(points); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
