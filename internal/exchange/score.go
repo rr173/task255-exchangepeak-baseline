@@ -146,7 +146,12 @@ func classify(a, b []pt) (string, float64, string, bool) {
 	lo, hi := ds[0], ds[len(ds)-1]
 
 	switch {
-	case slope < -trendSlopeEps: // 随升温差值缩小 → 融合
+	case slope < -trendSlopeEps: // 随升温差值整体缩小 → 融合
+		// 线性斜率只反映总趋势，无法排除中途反弹（如总体下降但中间回升）。
+		// 此处额外要求全程单调非增，避免把非单调序列误判为融合。
+		if !model.ValidExchangeTrend(model.ExchangeMerge, ds) {
+			return "", 0, "", false
+		}
 		if hi > mergeClosePPM {
 			return "", 0, "", false
 		}
@@ -154,9 +159,13 @@ func classify(a, b []pt) (string, float64, string, bool) {
 		if sc > 1 {
 			sc = 1
 		}
-		reason := fmt.Sprintf("随升温两峰化学位移差由 %.3f 收敛至 %.3f ppm，呈快交换融合特征", lo, hi)
+		reason := fmt.Sprintf("随升温两峰化学位移差由 %.3f 单调收敛至 %.3f ppm，呈快交换融合特征", lo, hi)
 		return model.ExchangeMerge, sc, reason, true
-	case slope > trendSlopeEps: // 随升温差值扩大 → 裂分
+	case slope > trendSlopeEps: // 随升温差值整体扩大 → 裂分
+		// 同上，要求全程单调非减，避免中途回落被误判为裂分。
+		if !model.ValidExchangeTrend(model.ExchangeSplit, ds) {
+			return "", 0, "", false
+		}
 		if lo > splitClosePPM || hi < splitFarPPM {
 			return "", 0, "", false
 		}
@@ -164,7 +173,7 @@ func classify(a, b []pt) (string, float64, string, bool) {
 		if sc > 1 {
 			sc = 1
 		}
-		reason := fmt.Sprintf("低温两峰接近(Δδ=%.3f)，升温后分离至 %.3f ppm，呈慢交换裂分特征", lo, hi)
+		reason := fmt.Sprintf("低温两峰接近(Δδ=%.3f)，升温后单调分离至 %.3f ppm，呈慢交换裂分特征", lo, hi)
 		return model.ExchangeSplit, sc, reason, true
 	}
 	return "", 0, "", false
