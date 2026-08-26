@@ -26,6 +26,10 @@ const linkTolerancePPM = 0.6
 //
 // 该启发式不保证全局最优，但对化学交换场景下"随温度升高两峰靠拢/融合"
 // 的位移连续性刻画是稳定且可复现的。
+//
+// 重复关联会重算整批轨迹：先清空上一版轨迹及其成员，再写入新的结果，
+// 因此轨道/成员数量不会随重算次数叠加。由于轨道 ID 在重算时全部更换，
+// 上一版由 score 派生的交换候选会指向已失效轨迹，故一并清空，待下次评分重生成。
 func (svc *Service) associate(batchID string) ([]model.PeakTrack, error) {
 	b, err := svc.Store.GetBatch(batchID)
 	if err != nil {
@@ -33,6 +37,13 @@ func (svc *Service) associate(batchID string) ([]model.PeakTrack, error) {
 	}
 	if b.State == model.BatchSealed {
 		return nil, model.ErrSealedBatch
+	}
+	// 替换上一版结果：轨迹成员 → 轨迹 → 失效候选证据，三者顺序保证无悬空引用。
+	if err := svc.Store.DeleteTracksByBatch(batchID); err != nil {
+		return nil, err
+	}
+	if err := svc.Store.DeleteCandidatesByBatch(batchID); err != nil {
+		return nil, err
 	}
 	standards, err := svc.Store.ListStandardsByBatch(batchID)
 	if err != nil {
