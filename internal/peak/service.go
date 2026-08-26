@@ -1,6 +1,9 @@
 package peak
 
 import (
+	"fmt"
+	"math"
+
 	"github.com/google/uuid"
 
 	"task255-exchangepeak/internal/model"
@@ -42,6 +45,18 @@ func (svc *Service) Add(in AddInput) (*model.Peak, error) {
 	}
 	if b.State == model.BatchSealed {
 		return nil, model.ErrSealedBatch
+	}
+	// 峰只能归属于当前批次的样品与温度条件：温度点必须存在、属于该批次所属样品，
+	// 且其温度值与入参一致。任一校验失败都不写入峰。
+	tp, err := svc.Store.GetTemperaturePoint(in.TemperatureID)
+	if err != nil {
+		return nil, err
+	}
+	if tp.SampleID != b.SampleID {
+		return nil, model.ErrInvalidInput
+	}
+	if tempKey(tp.TempC) != tempKey(in.TempC) {
+		return nil, model.ErrInvalidInput
 	}
 	p := &model.Peak{
 		ID:             uuid.NewString(),
@@ -96,4 +111,10 @@ func (svc *Service) markState(peakID, state string) error {
 		return model.ErrSealedBatch
 	}
 	return svc.Store.SetPeakState(peakID, state)
+}
+
+// tempKey 将温度归一化为毫度字符串，避免浮点误差导致同档温度判为不同。
+// 与 sample 包的 tempKey 保持一致，确保跨包的温度比对稳定可靠。
+func tempKey(t float64) string {
+	return fmt.Sprintf("%.3f", math.Round(t*1000)/1000)
 }
